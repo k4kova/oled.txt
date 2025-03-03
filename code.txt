@@ -1,0 +1,119 @@
+#include <WiFi.h>                   // ESP32'nin Wi-Fi bağlantısı için gerekli kütüphane
+#include <Wire.h>                   // I2C iletişimi için gerekli kütüphane (OLED ekran için)
+#include <Adafruit_SSD1306.h>        // OLED ekranı kontrol etmek için kullanılan kütüphane
+#include <WebServer.h>               // ESP32'nin bir web sunucusu olarak çalışmasını sağlayan kütüphane
+
+// Wi-Fi ağ adı (SSID) ve şifresi
+const char* ssid = "wifi adınız";    // Bağlanılacak Wi-Fi ağı adı
+const char* password = "wifinin şifresi"; // Bağlanılacak Wi-Fi ağı şifresi
+
+WebServer server(80); // ESP32'nin HTTP sunucusunu 80. portta başlatır
+
+// OLED ekranın genişliği ve yüksekliği tanımlanıyor
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+
+// OLED ekran nesnesi oluşturuluyor (Adafruit SSD1306 sürücüsü ile)
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
+
+// Gelen mesajı saklamak için değişkenler
+String receivedMessage = "Bekleniyor..."; // Web arayüzünden gelen mesaj buraya kaydedilecek
+String ipAddress = "Bağlanıyor...";       // ESP32'nin aldığı IP adresi burada saklanacak
+
+// Web arayüzünde görüntülenecek HTML sayfası
+String htmlPage = R"rawliteral(
+<!DOCTYPE html>
+<html>
+<head>
+    <title>ESP32 OLED</title>
+    <meta charset="UTF-8">
+</head>
+<body style="text-align:center;">
+    <h2>ESP32 OLED Ekran</h2>
+    <form action="/message" method="GET">
+        <input type="text" name="msg" placeholder="Mesajınızı yazın">
+        <input type="submit" value="Gönder">
+    </form>
+</body>
+</html>
+)rawliteral"; 
+// HTML kodları "" içinde tanımlandığı için web tarayıcısına gönderilecek sayfanın tasarımını belirler.
+// Kullanıcı buraya bir mesaj yazıp "Gönder" butonuna basarak ESP32'ye mesaj gönderebilir.
+
+// 📌 Wi-Fi'ye bağlanma fonksiyonu
+void setup_wifi() {
+    WiFi.begin(ssid, password); // Wi-Fi ağına bağlanmayı başlat
+    Serial.print("WiFi bağlanıyor...");
+    
+    while (WiFi.status() != WL_CONNECTED) { // Wi-Fi bağlantısı kurulana kadar bekle
+        delay(1000);
+        Serial.print("."); // Bağlantı kurulana kadar her saniye bir nokta yazdır
+    }
+    
+    Serial.println("\nWiFi Bağlandı!");
+    ipAddress = WiFi.localIP().toString(); // ESP32'nin aldığı IP adresini değişkene kaydet
+
+    Serial.print("ESP32 IP Adresi: ");
+    Serial.println(ipAddress);
+
+    // OLED ekrana IP adresini yazdır
+    display.clearDisplay();
+    display.setTextSize(1);
+    display.setTextColor(SSD1306_WHITE);
+    display.setCursor(0, 10);
+    display.println("ESP32 IP:");
+    display.println(ipAddress);
+    display.display();
+}
+
+// 📌 Web sunucusu üzerinden mesaj alma fonksiyonu
+void handleMessage() {
+    if (server.hasArg("msg")) { // Eğer kullanıcı bir mesaj girdiyse
+        receivedMessage = server.arg("msg"); // Girilen mesajı al ve değişkene kaydet
+        Serial.println("Gelen Mesaj: " + receivedMessage); // Konsola yazdır
+
+        // OLED ekrana mesajı yazdır
+        display.clearDisplay();
+        display.setCursor(0, 10);
+        display.setTextSize(1);
+        display.setTextColor(SSD1306_WHITE);
+        display.println("Mesaj:");
+        display.println(receivedMessage);
+        display.display();
+    }
+
+    server.send(200, "text/html", htmlPage); // Kullanıcıya HTML sayfasını tekrar göster
+}
+
+// 📌 Kurulum fonksiyonu (ESP32 ilk açıldığında çalışır)
+void setup() {
+    Serial.begin(115200); // Seri haberleşmeyi başlat (hata ayıklama için)
+
+    // OLED ekranı başlat
+    if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) { // OLED ekranın I2C adresi 0x3C olarak tanımlı
+        Serial.println("OLED başlatılamadı!");
+        while (1); // Hata olursa sonsuz döngüye gir
+    }
+
+    // OLED ekrana bağlantı bilgisi yazdır
+    display.clearDisplay();
+    display.setTextSize(1);
+    display.setTextColor(SSD1306_WHITE);
+    display.setCursor(0, 10);
+    display.println("WiFi'ye baglaniyor...");
+    display.display();
+
+    setup_wifi(); // Wi-Fi bağlantısını başlat ve IP adresini OLED ekrana yazdır
+
+    // Web sunucusuna istemci bağlantısı için endpoint tanımlamaları
+    server.on("/", []() { server.send(200, "text/html", htmlPage); }); // Ana sayfa ("/") isteğine HTML sayfasını gönder
+    server.on("/message", handleMessage); // "/message" isteği geldiğinde handleMessage() fonksiyonunu çağır
+
+    server.begin(); // Web sunucusunu başlat
+    Serial.println("Web sunucusu başlatıldı!");
+}
+
+// 📌 Ana döngü fonksiyonu (ESP32 çalıştığı sürece sürekli çalışır)
+void loop() {
+    server.handleClient(); // Web sunucusu gelen istekleri sürekli kontrol eder
+}
